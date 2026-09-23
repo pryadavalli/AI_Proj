@@ -1,1 +1,30 @@
 /.azure
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Visual Studio and local user files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.rsuser
+
+# Local databases and runtime files
+*.db
+*.db-shm
+*.db-wal
+
+# Test and coverage output
+**/TestResults/
+**/coverage/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Operating system files
+.DS_Store
+Thumbs.db
