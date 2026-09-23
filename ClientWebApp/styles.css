@@ -70,6 +70,13 @@ button {
   background: var(--mint-deep);
   font-weight: 800;
 }
+.agent-avatar {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 11px;
+}
 
 .brand-copy {
   display: grid;
@@ -244,14 +251,14 @@ h1 em {
 .conversation {
   flex: 1;
   width: min(750px, calc(100% - 2 * clamp(28px, 7vw, 108px)));
-  margin: 30px auto 0;
-  padding-bottom: 18px;
+  margin: 20px auto 0;
+  padding-bottom: 10px;
   overflow-y: auto;
 }
 .welcome-message,
 .user-message {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: flex-start;
   animation: rise-in 0.35s ease both;
 }
@@ -261,11 +268,11 @@ h1 em {
 }
 .message-meta {
   display: flex;
-  gap: 9px;
+  gap: 7px;
   align-items: center;
-  margin: 2px 0 8px;
+  margin: 1px 0 4px;
   color: var(--teal);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 .message-meta time {
@@ -276,13 +283,40 @@ h1 em {
   font-weight: 400;
 }
 .message-bubble {
-  padding: 15px 18px;
+  padding: 9px 12px;
   border-radius: 3px 14px 14px 14px;
-  font-size: 13px;
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.45;
 }
 .message-bubble p {
   margin: 0;
+}
+.agent-bubble > p {
+  white-space: pre-wrap;
+}
+.table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.response-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--teal);
+  font:
+    11px/1.45 "DM Mono",
+    monospace;
+  white-space: nowrap;
+}
+.response-table th,
+.response-table td {
+  padding: 5px 7px;
+  border-bottom: 1px solid rgba(23, 77, 72, 0.12);
+  text-align: left;
+}
+.response-table th {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.55);
+  font-weight: 700;
 }
 .message-bubble p + p {
   margin-top: 8px;
@@ -293,7 +327,7 @@ h1 em {
 }
 .user-message {
   justify-content: flex-end;
-  margin: 25px 0;
+  margin: 12px 0;
 }
 .user-message .message-content {
   order: -1;
@@ -308,8 +342,8 @@ h1 em {
   background: var(--teal);
 }
 .result-block {
-  margin-top: 10px;
-  padding: 10px 12px;
+  margin-top: 7px;
+  padding: 7px 9px;
   border: 1px solid rgba(23, 77, 72, 0.12);
   border-radius: 7px;
   color: var(--teal);
@@ -323,7 +357,7 @@ h1 em {
 .typing {
   display: inline-flex;
   gap: 4px;
-  padding: 18px;
+  padding: 12px;
 }
 .typing span {
   width: 5px;

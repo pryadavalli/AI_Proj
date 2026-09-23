@@ -18,6 +18,7 @@ public sealed class OllamaAgentModel : IAgentModel
     public async Task<AgentPlan> CreatePlanAsync(
         string userMessage,
         IReadOnlyList<string> tools,
+        string? planningContext = null,
         CancellationToken cancellationToken = default)
     {
         var model = _configuration["Ollama:Model"] ?? "llama3.2";
@@ -31,7 +32,7 @@ public sealed class OllamaAgentModel : IAgentModel
                 new
                 {
                     role = "system",
-                    content = "You are a banking request planner. Select exactly one available MCP tool. Return only JSON with fields: tool, arguments, message. Use an empty arguments object when no tool applies. Never invent account IDs, names, or amounts."
+                    content = "You are a banking agent planner. Select the next available MCP tool needed to answer the user's request. You may request tools across multiple steps. Use results from the planning context for later arguments. If the request can be answered from the context, return an empty tool and put the final answer in message. Return only JSON with fields: tool, arguments, message. Use an empty arguments object when no tool applies. Never invent account IDs, names, or amounts. Do not repeat a completed tool call unless necessary."
                 },
                 new
                 {
@@ -41,7 +42,7 @@ public sealed class OllamaAgentModel : IAgentModel
                 new
                 {
                     role = "user",
-                    content = userMessage
+                    content = $"User request:\n{userMessage}\n\nPlanning context from completed tool calls:\n{planningContext ?? "(none)"}"
                 }
             }
         };
@@ -61,6 +62,42 @@ public sealed class OllamaAgentModel : IAgentModel
         {
             PropertyNameCaseInsensitive = true
         }) ?? throw new InvalidOperationException("Ollama returned an invalid agent plan.");
+    }
+
+    public async Task<string> FormatResponseAsync(
+        string userMessage,
+        object toolResult,
+        CancellationToken cancellationToken = default)
+    {
+        var model = _configuration["Ollama:Model"] ?? "llama3.2";
+        var request = new
+        {
+            model,
+            stream = false,
+            messages = new[]
+            {
+                new
+                {
+                    role = "system",
+                    content = "You are a banking assistant formatting tool results. Answer the user's request using only the supplied tool result. If the user requests a table, return a plain-text Markdown table. Be concise. Do not invent or omit data. Return only the final response text, without JSON wrappers."
+                },
+                new
+                {
+                    role = "user",
+                    content = $"User request:\n{userMessage}\n\nMCP tool result JSON:\n{JsonSerializer.Serialize(toolResult)}"
+                }
+            }
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync("api/chat", request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(cancellationToken)
+            ?? throw new InvalidOperationException("Ollama returned an empty response.");
+
+        return string.IsNullOrWhiteSpace(payload.Message?.Content)
+            ? throw new InvalidOperationException("Ollama returned no formatted response.")
+            : payload.Message.Content.Trim();
     }
 
     private sealed class OllamaChatResponse

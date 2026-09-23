@@ -33,79 +33,180 @@ public sealed class AgentService
             var depositTool = ResolveToolName("deposit", tools);
             if (depositTool is not null)
             {
+                var result = await _mcp.CallToolAsync(depositTool, new Dictionary<string, JsonElement>
+                {
+                    ["accountId"] = JsonSerializer.SerializeToElement(depositAccountId),
+                    ["amount"] = JsonSerializer.SerializeToElement(depositAmount)
+                }, cancellationToken);
+
                 return new AgentResponse
                 {
-                    Answer = await _mcp.CallToolAsync(depositTool, new Dictionary<string, JsonElement>
-                    {
-                        ["accountId"] = JsonSerializer.SerializeToElement(depositAccountId),
-                        ["amount"] = JsonSerializer.SerializeToElement(depositAmount)
-                    }, cancellationToken)
+                    Answer = await FormatToolResultAsync(userMessage, result, cancellationToken)
                 };
             }
         }
 
-        var plan = await _model.CreatePlanAsync(userMessage.Trim(), tools, cancellationToken);
+        var completedToolCalls = new List<object>();
+        const int maxToolCalls = 20;
 
-        if (string.IsNullOrWhiteSpace(plan.Tool))
+        for (var step = 0; step < maxToolCalls; step++)
         {
-            return new AgentResponse
+            var planningContext = completedToolCalls.Count == 0
+                ? null
+                : JsonSerializer.Serialize(completedToolCalls);
+            var plan = await _model.CreatePlanAsync(userMessage.Trim(), tools, planningContext, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(plan.Tool))
             {
-                Answer = new
+                if (completedToolCalls.Count == 0)
                 {
-                    status = "ok",
+                    return new AgentResponse
+                    {
+                        Answer = new
+                        {
+                            status = "ok",
+                            tools,
+                            message = plan.Message ?? "The model could not identify a banking action."
+                        }
+                    };
+                }
+
+                return new AgentResponse
+                {
+                    Answer = await FormatFinalResponseAsync(userMessage, completedToolCalls, cancellationToken)
+                };
+            }
+
+            var tool = ResolveToolName(GetRequestedTool(userMessage, plan.Tool), tools);
+            if (tool is null)
+            {
+                return new AgentResponse
+                {
+                    Answer = new
+                    {
+                        status = "invalid_model_plan",
+                        message = $"The model selected an unavailable MCP tool: {plan.Tool}",
+                        tools
+                    }
+                };
+            }
+
+            if (completedToolCalls.Count == 0 && RequiresAccountDiscovery(userMessage))
+            {
+                tool = ResolveToolName("list_accounts", tools) ?? tool;
+            }
+
+            var arguments = NormalizeArguments(tool, plan.Arguments);
+            ApplyUserSuppliedValues(userMessage, tool, arguments);
+            var missingArgument = GetRequiredArguments(tool)
+                .FirstOrDefault(argument => !arguments.ContainsKey(argument));
+
+            if (missingArgument is not null)
+            {
+                return new AgentResponse
+                {
+                    Answer = new
+                    {
+                        status = "missing_argument",
+                        message = GetMissingArgumentMessage(tool, missingArgument)
+                    }
+                };
+            }
+
+            if (RequiresAccountIdentifier(tool)
+                && !ContainsAccountIdentifier(userMessage)
+                && completedToolCalls.Count == 0)
+            {
+                return new AgentResponse
+                {
+                    Answer = new
+                    {
+                        status = "missing_argument",
+                        message = GetMissingArgumentMessage(tool, tool == "get_customer_profile" ? "customerId" : "accountId")
+                    }
+                };
+            }
+
+            var toolResult = await _mcp.CallToolAsync(tool, arguments, cancellationToken);
+            completedToolCalls.Add(new { tool, arguments, result = toolResult });
+
+            if (tool == "list_accounts" && RequiresAccountDiscovery(userMessage))
+            {
+                foreach (var accountId in GetAccountIdentifiers(toolResult))
+                {
+                    var transactionArguments = new Dictionary<string, JsonElement>
+                    {
+                        ["accountId"] = JsonSerializer.SerializeToElement(accountId),
+                        ["count"] = JsonSerializer.SerializeToElement(500)
+                    };
+                    var transactionResult = await _mcp.CallToolAsync("get_transactions", transactionArguments, cancellationToken);
+                    completedToolCalls.Add(new
+                    {
+                        tool = "get_transactions",
+                        arguments = transactionArguments,
+                        result = transactionResult
+                    });
+                }
+
+                return new AgentResponse
+                {
+                    Answer = await FormatFinalResponseAsync(userMessage, completedToolCalls, cancellationToken)
+                };
+            }
+
+            if (completedToolCalls.Count == 1 && plan.Tool.Equals("list_accounts", StringComparison.OrdinalIgnoreCase))
+            {
+                var nextPlan = await _model.CreatePlanAsync(
+                    userMessage.Trim(),
                     tools,
-                    message = plan.Message ?? "The model could not identify a banking action."
-                }
-            };
-        }
-
-        var tool = ResolveToolName(GetRequestedTool(userMessage, plan.Tool), tools);
-        if (tool is null)
-        {
-            return new AgentResponse
-            {
-                Answer = new
+                    JsonSerializer.Serialize(completedToolCalls),
+                    cancellationToken);
+                if (string.IsNullOrWhiteSpace(nextPlan.Tool))
                 {
-                    status = "invalid_model_plan",
-                    message = $"The model selected an unavailable MCP tool: {plan.Tool}",
-                    tools
+                    return new AgentResponse
+                    {
+                        Answer = await FormatToolResultAsync(userMessage, toolResult, cancellationToken)
+                    };
                 }
-            };
-        }
-
-        var arguments = NormalizeArguments(tool, plan.Arguments);
-        ApplyUserSuppliedValues(userMessage, tool, arguments);
-        var missingArgument = GetRequiredArguments(tool)
-            .FirstOrDefault(argument => !arguments.ContainsKey(argument));
-
-        if (missingArgument is not null)
-        {
-            return new AgentResponse
-            {
-                Answer = new
-                {
-                    status = "missing_argument",
-                    message = GetMissingArgumentMessage(tool, missingArgument)
-                }
-            };
-        }
-
-        if (RequiresAccountIdentifier(tool) && !ContainsAccountIdentifier(userMessage))
-        {
-            return new AgentResponse
-            {
-                Answer = new
-                {
-                    status = "missing_argument",
-                    message = GetMissingArgumentMessage(tool, tool == "get_customer_profile" ? "customerId" : "accountId")
-                }
-            };
+            }
         }
 
         return new AgentResponse
         {
-            Answer = await _mcp.CallToolAsync(tool, arguments, cancellationToken)
+            Answer = await FormatFinalResponseAsync(userMessage, completedToolCalls, cancellationToken)
         };
+    }
+
+    private async Task<object> FormatFinalResponseAsync(
+        string userMessage,
+        IReadOnlyList<object> completedToolCalls,
+        CancellationToken cancellationToken)
+    {
+        return await _model.FormatResponseAsync(userMessage, completedToolCalls, cancellationToken);
+    }
+
+    private async Task<object> FormatToolResultAsync(
+        string userMessage,
+        object toolResult,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var formattedResponse = await _model.FormatResponseAsync(userMessage, toolResult, cancellationToken);
+            return new
+            {
+                message = formattedResponse,
+                data = toolResult
+            };
+        }
+        catch (HttpRequestException)
+        {
+            return toolResult;
+        }
+        catch (JsonException)
+        {
+            return toolResult;
+        }
     }
 
     private static string? ResolveToolName(string requestedTool, IReadOnlyList<string> tools)
@@ -179,6 +280,36 @@ public sealed class AgentService
     private static bool ContainsAccountIdentifier(string message)
     {
         return TryGetAccountIdentifier(message) is not null;
+    }
+
+    private static bool RequiresAccountDiscovery(string message)
+    {
+        return Regex.IsMatch(
+            message,
+            @"\b(all|every|each)\s+accounts?\b|\bwhich\s+customer\b|\bmost\s+transactions?\b|\bmore\s+transactions?\b",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static IReadOnlyList<string> GetAccountIdentifiers(object toolResult)
+    {
+        var result = JsonSerializer.SerializeToElement(toolResult);
+        if (result.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return result.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.Object)
+            .Select(item =>
+            {
+                if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                    return id.GetString();
+                if (item.TryGetProperty("accountNumber", out var accountNumber) && accountNumber.ValueKind == JsonValueKind.String)
+                    return accountNumber.GetString();
+                return null;
+            })
+            .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
+            .Select(identifier => identifier!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string GetRequestedTool(string message, string plannedTool)

@@ -139,10 +139,104 @@ function addAgentMessage(answer, isError = false) {
         ${result ? `<div class="result-block"></div>` : ""}
       </div>
     </div>`;
-  wrapper.querySelector(".message-bubble p").textContent = message;
+  const messageElement = wrapper.querySelector(".message-bubble p");
+  const table = createDataTable(answer?.data) || createMarkdownTable(message);
+  if (table) {
+    messageElement.remove();
+    wrapper.querySelector(".message-bubble").prepend(table);
+  } else {
+    messageElement.textContent = message;
+  }
   if (result) wrapper.querySelector(".result-block").textContent = result;
   conversation.append(wrapper);
   scrollConversation();
+}
+
+function createMarkdownTable(message) {
+  const tokens = message
+    .split("|")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const separatorIndex = tokens.findIndex((token) => /^:?-{3,}:?$/.test(token));
+
+  if (separatorIndex < 2) return null;
+
+  const columnCount = separatorIndex;
+  const headers = tokens.slice(0, columnCount);
+  const rows = [];
+  for (let index = separatorIndex + 1; index + columnCount <= tokens.length; index += columnCount) {
+    rows.push(tokens.slice(index, index + columnCount));
+  }
+
+  if (rows.length === 0) return null;
+
+  const tableWrapper = document.createElement("div");
+  tableWrapper.className = "table-wrapper";
+  const table = document.createElement("table");
+  table.className = "response-table";
+
+  const headerRow = document.createElement("tr");
+  headers.forEach((header) => {
+    const cell = document.createElement("th");
+    cell.textContent = header;
+    headerRow.append(cell);
+  });
+  const head = document.createElement("thead");
+  head.append(headerRow);
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tableRow = document.createElement("tr");
+    row.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      tableRow.append(cell);
+    });
+    body.append(tableRow);
+  });
+  table.append(body);
+  tableWrapper.append(table);
+  return tableWrapper;
+}
+
+function createDataTable(data) {
+  if (!Array.isArray(data) || data.length === 0 || data.some((row) => !row || typeof row !== "object" || Array.isArray(row))) {
+    return null;
+  }
+
+  const headers = [...new Set(data.flatMap((row) => Object.keys(row)))];
+  if (headers.length === 0) return null;
+
+  const tableWrapper = document.createElement("div");
+  tableWrapper.className = "table-wrapper";
+  const table = document.createElement("table");
+  table.className = "response-table";
+  const head = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+
+  headers.forEach((header) => {
+    const cell = document.createElement("th");
+    cell.textContent = header;
+    headerRow.append(cell);
+  });
+  head.append(headerRow);
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  data.forEach((row) => {
+    const tableRow = document.createElement("tr");
+    headers.forEach((header) => {
+      const cell = document.createElement("td");
+      const value = row[header];
+      cell.textContent = value === null || value === undefined ? "" : String(value);
+      tableRow.append(cell);
+    });
+    body.append(tableRow);
+  });
+  table.append(body);
+  tableWrapper.append(table);
+  return tableWrapper;
 }
 
 function extractMessage(answer) {
@@ -160,6 +254,7 @@ function extractResult(answer, message) {
   delete visible.message;
   delete visible.answer;
   delete visible.tools;
+  if (Array.isArray(visible.data)) delete visible.data;
   if (Object.keys(visible).length === 0) return "";
   return JSON.stringify(visible, null, 2);
 }
