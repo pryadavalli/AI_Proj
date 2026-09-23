@@ -10,6 +10,12 @@ Double-click `start-all.bat`, or run this from PowerShell:
 Start-Process .\ClientWebApp\start-all.bat
 ```
 
+You can also use:
+
+```powershell
+Start-Process .\ClientWebApp\start
+```
+
 Run that command from the repository root. If your terminal is already inside `ClientWebApp`, use `Start-Process .\start-all.bat` instead.
 
 This opens separate terminals for BankingService, AI_Agent, and the Vite client server, then opens the client at `http://localhost:8080`.
